@@ -7,7 +7,7 @@ from gridfs import GridFS
 from moviepy.editor import VideoFileClip
 
 
-# Create a MongoDB client and connect to your database
+# Create a MongoDB client and connect to database
 client = MongoClient(os.environ['MONGODB_URI'])
 db = client['HNG']
 fs = GridFS(db)
