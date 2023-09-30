@@ -5,9 +5,11 @@ from video import Videos, db, fs
 from bson import ObjectId
 from flask import send_file
 from video import Videos, db
+from flask_cors import CORS
 
 
 app = Flask(__name__)
+CORS(app)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 
 from bson.objectid import ObjectId
