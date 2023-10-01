@@ -6,6 +6,7 @@ from bson import ObjectId
 from flask import send_file
 from video import Videos, db
 from flask_cors import CORS
+import tempfile
 
 
 app = Flask(__name__)
@@ -25,21 +26,24 @@ def upload_video():
         return jsonify({'error': 'File has no name'}, 400)
 
     if file:
-        filename = secure_filename(file.filename)
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(file_path)
+        # Save the file to a temporary location
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            file.save(temp_file.name)
+            temp_filename = temp_file.name
 
-        video = Videos(file_path)
-        video.save()
+        video = Videos(temp_filename)  # Pass the temporary filename to Videos
 
-        #Extract audio from video
+        # Extract audio from video
         video.extract_audio()
 
-        # Compress the video and check if size is still too big (10GB limit)
-        if not video.compress_video(10 * 1024 * 1024 * 1024):
+        # Compress the video and check if size is still too big (512MB limit)
+        if not video.compress_video(512 * 1024 * 1024):
             return jsonify({'error': 'Video size is still too big after compression'}, 400)
 
         video_url = video.get_video_url()
+
+        # Save the video and audio to the database
+        video.save()
 
         # Retrieve the transcription from the MongoDB collection
         audio_collection = db['Audio']
@@ -49,7 +53,7 @@ def upload_video():
         response = {
             'message': 'Video uploaded and compressed successfully!',
             'id': video.id,
-            'filename': video.filename,
+            'filename': file.filename,
             'created_time': video.created_time.isoformat(),
             'url': video_url,
             'transcription': []
@@ -60,36 +64,13 @@ def upload_video():
                 'text': timestamp['text'],
                 'start_time': timestamp['start_time'],
                 'end_time': timestamp['end_time']
-
-                
             })
 
         response['transcription'] = response['transcription'][:1]  # Limit to the first 3 timestamps
-        message = 'Video uploaded and compressed successfully!'
-        return jsonify(message, response, 201)
-        
+
+        return jsonify(response, 201)
 
     return jsonify({'error': 'Failed to upload video'}, 400)
-
-@app.route('/api/videos', methods=['GET'])
-# Get all videos
-def video():
-    video_collection = db['Videos']
-    videos = video_collection.find()
-    video_files = []
-
-    for video in videos:
-        video_files.append({
-            'id': video['id'],
-            'filename': video['filename'],
-            'created_time': video['created_time'].isoformat(),
-            'stream_url': f'/api/videos/{video["id"]}/stream'
-        })
-
-    return jsonify({
-        'message': 'Videos retrieved successfully',
-        'video_files': video_files
-        }, 200)
 
 
 @app.route('/api/videos/<video_id>/stream', methods=['GET'])
