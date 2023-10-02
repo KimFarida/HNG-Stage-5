@@ -6,7 +6,7 @@
 - **Description:** Upload a video file for processing.
 - **Curl:**
   ```bash
-  curl -X POST -F "file=@path/to/your/video.mp4" https://chrome-ext-api.onrender.com)/api/upload
+  curl -X POST -F "file=@path/to/your/video.mp4" https://chrome-ext-api.onrender.com/api/upload
   ```
 - **Browser:** Not applicable (POST request).
 
@@ -33,7 +33,7 @@
   ```
 - **Browser:**
   ```
-  https://chrome-ext-api.onrender.com)api/transcription/<video_id>
+  https://chrome-ext-api.onrender.com/api/transcription/<video_id>
   ```
 
 ### 4. Get All Videos
