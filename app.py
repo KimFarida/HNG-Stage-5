@@ -36,9 +36,9 @@ def upload_video():
         # Extract audio from video
         video.extract_audio()
 
-        # Compress the video and check if size is still too big (512MB limit)
-        if not video.compress_video(512 * 1024 * 1024):
-            return jsonify({'error': 'Video size is still too big after compression'}, 400)
+        # Compress the video and check if size is still too big (25MB limit)
+        # if not video.compress_video(25 * 1024 * 1024):
+        #     return jsonify({'error': 'Video size is still too big after compression'}, 400)
 
         video_url = video.get_video_url()
 
@@ -115,6 +115,26 @@ def get_transcription(video_id):
 
     return jsonify(response, 200)
 
+
+@app.route('/api/videos', methods=['GET'])
+# Get all videos
+def video():
+    video_collection = db['Videos']
+    videos = video_collection.find()
+    video_files = []
+
+    for video in videos:
+        video_files.append({
+            'id': video['id'],
+            'filename': video['filename'],
+            'created_time': video['created_time'].isoformat(),
+            'stream_url': f'/api/videos/{video["id"]}/stream'
+        })
+
+    return jsonify({
+        'message': 'Videos retrieved successfully',
+        'video_files': video_files
+        }, 200)
 
 
 

@@ -67,7 +67,7 @@ class Videos:
             'filename': self.filename,
             'file_id': file_id,  # Save the compressed video file ID
             'created_time': self.created_time,
-            'url': self.url,
+            'url': f'/api/videos/{self.id}/stream',
             'transcript': self.transcript  # Save the transcript
         })
 
@@ -100,6 +100,14 @@ class Videos:
                 transcript = alternative['transcript']
 
         self.transcript = transcript
+        video_collection = db['Videos']
+        video_collection.insert_one({
+            'id': self.id,
+            'filename': self.filename,
+            'created_time': self.created_time,
+            'url': self.url,
+            'transcript': self.transcript  # Save the transcript
+        })
 
     def get_video_url(self):
         # Retrieve the video file ID from the Videos collection
