@@ -66,7 +66,7 @@ def upload_video():
                 'end_time': timestamp['end_time']
             })
 
-        response['transcription'] = response['transcription'][:1]  # Limit to the first 3 timestamps
+        response['transcription'] = response['transcription'][:3]  # Limit to the first 3 timestamps
 
         return jsonify(response, 201)
 

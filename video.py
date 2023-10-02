@@ -91,13 +91,43 @@ class Videos:
         # Convert speech to text
         result = r.recognize_google(data, show_all=True)
 
-        # Process the transcription
-        transcript = ""
-        alternatives = result.get('alternative', [])
-        if alternatives:
-            alternative = alternatives[0]  # Get the first alternative
-            if 'transcript' in alternative:
-                transcript = alternative['transcript']
+        # Process the transcription and generate timestamps manually
+        timestamps = []
+        audio_duration = video.duration
+        interval_duration = 15  # Interval duration in seconds
+        num_intervals = int(audio_duration / interval_duration)
+        current_time = 0.0
+
+        for i in range(num_intervals):
+            start_time = current_time
+            end_time = current_time + interval_duration
+            current_time += interval_duration
+
+            # Convert timestamps to timedelta objects
+            start_time = datetime.timedelta(seconds=start_time)
+            end_time = datetime.timedelta(seconds=end_time)
+
+            # Find the corresponding transcript for the interval
+            transcript = ""
+            alternatives = result.get('alternative', [])
+            if alternatives:
+                alternative = alternatives[0]  # Get the first alternative
+                if 'transcript' in alternative:
+                    transcript = alternative['transcript']
+
+            # Append the timestamped transcript
+            timestamps.append({
+                'start_time': str(start_time),
+                'end_time': str(end_time),
+                'text': transcript.strip()
+            })
+
+        # Save the transcription and timestamps to the MongoDB collection
+        audio_collection = db['Audio']
+        audio_collection.insert_one({
+            'video_id': self.id,
+            'timestamps': timestamps
+        })
 
         self.transcript = transcript
         video_collection = db['Videos']
