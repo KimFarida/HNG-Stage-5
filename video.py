@@ -17,7 +17,7 @@ class Videos:
     def __init__(self, temp_filename):
         self.temp_filename = temp_filename
         self.id = str(uuid.uuid4())
-        self.created_time = datetime.datetime.now()
+        datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
         self.url = self.get_video_url()
         self.filename = os.path.basename(temp_filename)
         self.compressed_filename = None  # Initialize the compressed filename attribute
