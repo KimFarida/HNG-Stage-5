@@ -1,4 +1,4 @@
-import os
+import os, json
 from flask import Flask, request, jsonify,  send_file
 from werkzeug.utils import secure_filename
 from video import Videos, db, fs
@@ -7,13 +7,53 @@ from flask import send_file
 from video import Videos, db
 from flask_cors import CORS
 import tempfile
+from celery import Celery
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  
 
 
 app = Flask(__name__)
 CORS(app)
+app.config['CELERY_BROKER_URL'] = os.getenv('CELERY_BROKER_URL')
+celery = Celery(
+    app.import_name,
+    broker=app.config['CELERY_BROKER_URL'],
+
+)
+
 app.config['UPLOAD_FOLDER'] = 'uploads'
 
 from bson.objectid import ObjectId
+
+@celery.task(name='transcribe-video')
+def transcribe(video_json):
+
+    # Deserialize the video object from the JSON string
+    video_data = json.loads(video_json)
+    video_id = video_data['id']
+    temp_filename = video_data['temp_filename']
+
+    video = Videos(temp_filename)
+    video.id = video_id
+    if video is None:
+        return {'error': 'Video not found'}
+    try:
+        # Extract audio from video
+        video.extract_audio()
+
+        # Retrieve the transcription from the MongoDB collection
+        audio_collection = db['Audio']
+        audio = audio_collection.find_one({'video_id': video_id})
+        timestamps = audio['timestamps'] if audio else []
+       
+        print("transcription done")
+        return 201 
+    
+    except Exception as e:
+        print(f'Error processing video {video_id}: {str(e)}')
+        return {'error': 'Failed to process video'}, 400
 
 
 @app.route('/api/upload', methods=['POST'])
@@ -22,6 +62,7 @@ def upload_video():
         return jsonify({'error': 'No file provided'}, 400)
 
     file = request.files['file']
+
     if file.filename == '':
         return jsonify({'error': 'File has no name'}, 400)
 
@@ -33,46 +74,32 @@ def upload_video():
 
         video = Videos(temp_filename)  # Pass the temporary filename to Videos
 
-        # Extract audio from video
-        video.extract_audio()
-
         # Compress the video and check if size is still too big (25MB limit)
         # if not video.compress_video(25 * 1024 * 1024):
         #     return jsonify({'error': 'Video size is still too big after compression'}, 400)
 
-        video_url = video.get_video_url()
-
-        # Save the video and audio to the database
+        # Save the video to the database
         video.save()
 
-        # Retrieve the transcription from the MongoDB collection
-        audio_collection = db['Audio']
-        audio = audio_collection.find_one({'video_id': video.id})
-        timestamps = audio['timestamps'] if audio else []
+        video_json = json.dumps(video.to_json())
+
+        # Trigger the Celery task asynchronously
+        task = transcribe.apply_async(args=[video_json])
 
         response = {
-            'message': 'Video uploaded and compressed successfully!',
+            'message': 'Video uploaded successfully and transcription started!',
+            'task_id': task.id,
             'id': video.id,
             'filename': file.filename,
-            'created_time': video.created_time.isoformat(),
-            'url': video_url,
-            'transcription': []
+            'created_time': video.created_time,
+            'url': video.url,
         }
 
-        for timestamp in timestamps:
-            response['transcription'].append({
-                'text': timestamp['text'],
-                'start_time': timestamp['start_time'],
-                'end_time': timestamp['end_time']
-            })
-
-        response['transcription'] = response['transcription'][:3]  # Limit to the first 3 timestamps
-
-        return jsonify(response, 201)
+        return jsonify(response, 202)
 
     return jsonify({'error': 'Failed to upload video'}, 400)
 
-
+#Works
 @app.route('/api/videos/<video_id>/stream', methods=['GET'])
 # Stream a video
 def stream_video(video_id):
@@ -86,36 +113,49 @@ def stream_video(video_id):
     # Stream the video file using Flask's send_file function
     return send_file(grid_out, mimetype='video/mp4')
 
-
+#Works
 @app.route('/api/transcription/<video_id>', methods=['GET'])
 # Get the transcription for a video
 def get_transcription(video_id):
     video = Videos.find_by_id(video_id)
     if video is None:
-        return jsonify({'error': 'Video not found'})
+        return jsonify({'error': 'Video not found'}), 404
 
     audio_collection = db['Audio']
     audio = audio_collection.find_one({'video_id': video_id})
-    if audio is None:
-        return jsonify({'error': 'Transcription not available for this video'},404)
+    if audio is None or 'timestamps' not in audio:
+        return jsonify({'error': 'Transcription not available for this video'}), 404
 
-    transcription = audio['timestamps'] if 'timestamps' in audio else []
+    transcription = audio['timestamps']
 
     response = {
         'video_id': video_id,
-        'transcription': []
+        'transcription': transcription
     }
 
-    for timestamp in transcription:
-        response['transcription'].append({
-            'text': timestamp['text'],
-            'start_time': timestamp['start_time'],
-            'end_time': timestamp['end_time']
-        })
+    return jsonify(response), 200
 
-    return jsonify(response, 200)
+#Works
+#Get video details by ID
+@app.route('/api/videos/<string:video_id>', methods=['GET'])
+def get_video_details(video_id):
+    video_data = Videos.find_by_id(video_id)
 
+    if video_data:
 
+        video_details = {
+            'id': video_data['id'],
+            'filename': video_data['filename'],
+            'created_time': video_data['created_time'],
+            'stream_url': f'/api/videos/{video_data["id"]}/stream',
+            'transcript_url': f'/api/transcription/{video_data["id"]}'
+        }
+
+        return jsonify({'message': 'Video details retrieved successfully', 'video_details': video_details}), 200
+    else:
+        return jsonify({'error': 'Video not found'}, 404)
+
+#Works
 @app.route('/api/videos', methods=['GET'])
 # Get all videos
 def video():
@@ -127,7 +167,7 @@ def video():
         video_files.append({
             'id': video['id'],
             'filename': video['filename'],
-            'created_time': video['created_time'].isoformat(),
+            'created_time': video['created_time'],
             'stream_url': f'/api/videos/{video["id"]}/stream'
         })
 
