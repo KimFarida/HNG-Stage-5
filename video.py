@@ -6,35 +6,49 @@ import speech_recognition as sr
 from gridfs import GridFS
 from moviepy.editor import VideoFileClip
 import tempfile
+from dotenv import load_dotenv
+load_dotenv() 
 
 
-# Create a MongoDB client and connect to database
-client = MongoClient(os.environ['MONGODB_URI'])
+client = MongoClient(os.getenv('MONGODB_URI'))
 db = client['HNG']
+video_collection = db['Videos']
 fs = GridFS(db)
 
 class Videos:
     def __init__(self, temp_filename):
         self.temp_filename = temp_filename
         self.id = str(uuid.uuid4())
-        datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-        self.url = self.get_video_url()
+        self.created_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        self.url = f'/api/videos/{self.id}/stream'
         self.filename = os.path.basename(temp_filename)
-        self.compressed_filename = None  # Initialize the compressed filename attribute
+        self.compressed_filename = None  
         self.file_id = None
-        self.transcript = None  # Initialize the transcript attribute
+        self.transcript = None  
+
+    def to_json(self):
+        return {
+            'id': self.id,
+            'temp_filename': self.temp_filename,
+            'created_time': self.created_time,
+            'url': self.url,
+            'filename': self.filename,
+            'compressed_filename': self.compressed_filename,
+            'file_id': self.file_id,
+            'transcript': self.transcript
+        }
 
     def save(self):
-        # Save the video information to the MongoDB collection
-        video_collection = db['Videos']
+        # Saves the video information to the MongoDB collection
         video_collection.insert_one({
             'id': self.id,
             'filename': self.filename,
-            'compressed_filename': self.compressed_filename,  # Save the compressed filename
+            #'compressed_filename': self.compressed_filename, 
             'created_time': self.created_time,
             'url': self.url,
             'transcript': self.transcript  # Save the transcript
         })
+
         # Read the video file contents as bytes
         with open(self.temp_filename, 'rb') as file:
             file_data = file.read()
@@ -47,7 +61,7 @@ class Videos:
 
     def compress_video(self, max_size):
         video = VideoFileClip(self.temp_filename)
-        video_resized = video.resize(width=720)  # Assuming you want to resize the video to a width of 720 pixels
+        video_resized = video.resize(width=720)  # Resize the video to width of 720px
 
         temp_filepath = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
         self.compressed_filename = os.path.basename(temp_filepath)  # Set the compressed filename
@@ -129,15 +143,15 @@ class Videos:
             'timestamps': timestamps
         })
 
-        self.transcript = transcript
-        video_collection = db['Videos']
-        video_collection.insert_one({
-            'id': self.id,
-            'filename': self.filename,
-            'created_time': self.created_time,
-            'url': self.url,
-            'transcript': self.transcript  # Save the transcript
-        })
+        self.transcript = timestamps
+        # video_collection = db['Videos']
+        # video_collection.insert_one({
+        #     'id': self.id,
+        #     'filename': self.filename,
+        #     'created_time': self.created_time,
+        #     'url': self.url,
+        #     'transcript': timestamps  # Save the transcript
+        # })
 
     def get_video_url(self):
         # Retrieve the video file ID from the Videos collection
@@ -147,11 +161,26 @@ class Videos:
             return streaming_url
         else:
             return None
-
+       
     @staticmethod
     def find_by_id(video_id):
         video_collection = db['Videos']
         return video_collection.find_one({'id': video_id})
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
