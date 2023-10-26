@@ -5,72 +5,91 @@ import os
 import speech_recognition as sr
 from gridfs import GridFS
 from moviepy.editor import VideoFileClip
+import tempfile
+from dotenv import load_dotenv
+load_dotenv() 
 
 
-# Create a MongoDB client and connect to database
-client = MongoClient(os.environ['MONGODB_URI'])
+client = MongoClient(os.getenv('MONGODB_URI'))
 db = client['HNG']
+video_collection = db['Videos']
 fs = GridFS(db)
 
-
 class Videos:
-    def __init__(self, filepath):
+    def __init__(self, temp_filename):
+        self.temp_filename = temp_filename
         self.id = str(uuid.uuid4())
-        self.filepath = filepath
-        self.filename = os.path.basename(filepath)
-        self.created_time = datetime.datetime.now()
+        self.created_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        self.url = f'/api/videos/{self.id}/stream'
+        self.filename = os.path.basename(temp_filename)
+        self.compressed_filename = None  
+        self.file_id = None
+        self.transcript = None  
 
+    def to_json(self):
+        return {
+            'id': self.id,
+            'temp_filename': self.temp_filename,
+            'created_time': self.created_time,
+            'url': self.url,
+            'filename': self.filename,
+            'compressed_filename': self.compressed_filename,
+            'file_id': self.file_id,
+            'transcript': self.transcript
+        }
 
     def save(self):
+        # Saves the video information to the MongoDB collection
+        video_collection.insert_one({
+            'id': self.id,
+            'filename': self.filename,
+            #'compressed_filename': self.compressed_filename, 
+            'created_time': self.created_time,
+            'url': self.url,
+            'transcript': self.transcript  # Save the transcript
+        })
+
+        # Read the video file contents as bytes
+        with open(self.temp_filename, 'rb') as file:
+            file_data = file.read()
+
+        # Save the video file in GridFS
+        file_id = fs.put(file_data, filename=self.filename)
+
+        # Update the video document with the GridFS file ID
+        video_collection.update_one({'id': self.id}, {'$set': {'file_id': file_id}})
+
+    def compress_video(self, max_size):
+        video = VideoFileClip(self.temp_filename)
+        video_resized = video.resize(width=720)  # Resize the video to width of 720px
+
+        temp_filepath = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
+        self.compressed_filename = os.path.basename(temp_filepath)  # Set the compressed filename
+        video_resized.write_videofile(temp_filepath, codec="libx264", audio_codec="aac")
+
+        # Check if the compressed video size is within the specified limit
+        if os.path.getsize(temp_filepath) > max_size:
+            return False
+
+        # Save the compressed video file in GridFS
+        file_id = fs.put(open(temp_filepath, 'rb'), filename=self.compressed_filename)
+
         # Save the video information to the MongoDB collection
         video_collection = db['Videos']
         video_collection.insert_one({
             'id': self.id,
             'filename': self.filename,
-            'filepath': self.filepath,
-            'created_time': self.created_time
+            'file_id': file_id,  # Save the compressed video file ID
+            'created_time': self.created_time,
+            'url': f'/api/videos/{self.id}/stream',
+            'transcript': self.transcript  # Save the transcript
         })
 
-        # Store the video file in GridFS
-        with open(self.filepath, 'rb') as file:
-            file_id = fs.put(file, filename=self.filename)
-
-        # Update the video document with the GridFS file ID
-        video_collection.update_one({'id': self.id}, {'$set': {'file_id': file_id}})
-        video_collection.update_one({'id': self.id}, {'$set': {'filepath': self.filepath}})
-
-    def get_video_url(self):
-        #Retrieve the video file ID from the Videos collection
-        video = Videos.find_by_id(self.id)
-        if video is not None and 'file_id' in video:
-            file_id = video['file_id']
-            streaming_url = f'/api/videos/{self.id}/stream'
-            return streaming_url
-        else:
-            return None
-
-
-    def compress_video(self, target_size):
-        # Compress and convert the video to MP4 format
-        video = VideoFileClip(self.filepath)
-        video_resized = video.resize(height=360)  # Adjust the height as desired
-        temp_filepath = f"temp_{self.filename}"
-        video_resized.write_videofile(temp_filepath, codec="libx264", audio_codec="aac")
-
-        # Check if the compressed video size is still too big
-        if os.path.getsize(temp_filepath) > target_size:
-            os.remove(temp_filepath)
-            return False
-
-        # Replace the original video file with the compressed version
-        os.remove(self.filepath)
-        os.rename(temp_filepath, self.filepath)
         return True
-    
 
     def extract_audio(self):
         # Load the video
-        video = VideoFileClip(self.filepath)
+        video = VideoFileClip(self.temp_filename)
 
         # Extract the audio from the video
         audio_file = video.audio
@@ -124,14 +143,43 @@ class Videos:
             'timestamps': timestamps
         })
 
-        # Print the timestamps with corresponding transcripts
-        # for i, timestamp in enumerate(timestamps):
-        #     print(f"{timestamp['start_time']} - {timestamp['end_time']}: {timestamp['text']}")
+        self.transcript = timestamps
+        # video_collection = db['Videos']
+        # video_collection.insert_one({
+        #     'id': self.id,
+        #     'filename': self.filename,
+        #     'created_time': self.created_time,
+        #     'url': self.url,
+        #     'transcript': timestamps  # Save the transcript
+        # })
 
+    def get_video_url(self):
+        # Retrieve the video file ID from the Videos collection
+        video = Videos.find_by_id(self.id)
+        if video is not None:
+            streaming_url = f'/api/videos/{self.id}/stream'
+            return streaming_url
+        else:
+            return None
+       
     @staticmethod
     def find_by_id(video_id):
         video_collection = db['Videos']
         return video_collection.find_one({'id': video_id})
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
